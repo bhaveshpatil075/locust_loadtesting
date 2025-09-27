@@ -2,6 +2,7 @@ import React from 'react'
 import FileUpload from './components/FileUpload'
 import ScriptsList from './components/ScriptsList'
 import HealthCheck from './components/HealthCheck'
+import TestMonitor from './components/TestMonitor'
 
 function App() {
   return (
@@ -20,7 +21,7 @@ function App() {
           </p>
         </div>
         
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Upload & Generate</h2>
             <FileUpload />
@@ -30,6 +31,10 @@ function App() {
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Available Scripts</h2>
             <ScriptsList />
           </div>
+        </div>
+
+        <div className="mb-8">
+          <TestMonitor />
         </div>
       </div>
     </div>

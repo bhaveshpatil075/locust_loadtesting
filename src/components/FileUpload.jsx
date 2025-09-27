@@ -11,15 +11,21 @@ const FileUpload = () => {
   const [convertStatus, setConvertStatus] = useState('')
   const [generateStatus, setGenerateStatus] = useState('')
   const [generatedScript, setGeneratedScript] = useState(null)
+  const [flowData, setFlowData] = useState(null)
   const [dragActive, setDragActive] = useState(false)
 
   const handleFileSelect = (file) => {
     if (file) {
+      console.log('File selected:', file.name, 'Size:', file.size, 'Type:', file.type)
+      console.log('File object:', file)
       setSelectedFile(file)
       setUploadStatus('')
       setConvertStatus('')
       setGenerateStatus('')
       setGeneratedScript(null)
+      setFlowData(null)
+    } else {
+      console.log('No file selected or file is null')
     }
   }
 
@@ -54,11 +60,33 @@ const FileUpload = () => {
       return
     }
 
+    // Validate file
+    if (selectedFile.size === 0) {
+      setUploadStatus('❌ Selected file is empty')
+      return
+    }
+
+    if (selectedFile.size > 50 * 1024 * 1024) { // 50MB limit
+      setUploadStatus('❌ File size too large (max 50MB)')
+      return
+    }
+
+    // Double-check file is still valid
+    if (!selectedFile.name || selectedFile.size === undefined) {
+      setUploadStatus('❌ File appears to be corrupted, please select again')
+      return
+    }
+
     setUploading(true)
     setUploadStatus('')
 
     const formData = new FormData()
     formData.append('file', selectedFile)
+
+    // Debug logging
+    console.log('Uploading file:', selectedFile.name, 'Size:', selectedFile.size, 'Type:', selectedFile.type)
+    console.log('FormData entries:', Array.from(formData.entries()))
+    console.log('File object before upload:', selectedFile)
 
     try {
       const response = await axios.post(API_ENDPOINTS.UPLOAD, formData, {
@@ -68,19 +96,26 @@ const FileUpload = () => {
       })
       
       setUploadStatus(`✅ Upload successful! Response: ${JSON.stringify(response.data)}`)
-      setSelectedFile(null)
+      // Don't clear the file immediately - let user decide
+      // setSelectedFile(null)
       // Reset file input
-      const fileInput = document.getElementById('file-upload')
-      if (fileInput) fileInput.value = ''
+      // const fileInput = document.getElementById('file-upload')
+      // if (fileInput) fileInput.value = ''
     } catch (error) {
       console.error('Upload error:', error)
-      setUploadStatus(`❌ Upload failed: ${error.response?.data?.message || error.message}`)
+      console.error('Error response:', error.response?.data)
+      setUploadStatus(`❌ Upload failed: ${error.response?.data?.detail?.[0]?.msg || error.response?.data?.message || error.message}`)
     } finally {
       setUploading(false)
     }
   }
 
   const handleConvert = async () => {
+    if (!selectedFile) {
+      setConvertStatus('❌ Please upload a file first')
+      return
+    }
+
     setConverting(true)
     setConvertStatus('')
 
@@ -90,23 +125,39 @@ const FileUpload = () => {
         timestamp: new Date().toISOString()
       })
       
-      setConvertStatus(`✅ Convert successful! Response: ${JSON.stringify(response.data)}`)
+      // Extract the flow_data from the convert response
+      const flowData = response.data.flow_data
+      
+      if (!flowData) {
+        setConvertStatus('❌ Convert failed: No flow_data found in response')
+        return
+      }
+      
+      // Store the extracted flow data for use in generate
+      setFlowData(flowData)
+      setConvertStatus(`✅ Convert successful! Flow data ready for generation`)
     } catch (error) {
       console.error('Convert error:', error)
-      setConvertStatus(`❌ Convert failed: ${error.response?.data?.message || error.message}`)
+      setConvertStatus(`❌ Convert failed: ${error.response?.data?.detail?.[0]?.msg || error.response?.data?.message || error.message}`)
     } finally {
       setConverting(false)
     }
   }
 
   const handleGenerate = async () => {
+    if (!flowData) {
+      setGenerateStatus('❌ Please convert the file first to get flow data')
+      return
+    }
+
     setGenerating(true)
     setGenerateStatus('')
     setGeneratedScript(null)
 
     try {
       const response = await axios.post(API_ENDPOINTS.GENERATE, {
-        // You can add any parameters needed for generation
+        // Send the flow data directly (already extracted from convert response)
+        ...flowData,
         timestamp: new Date().toISOString(),
         type: 'load_test'
       })
@@ -117,7 +168,7 @@ const FileUpload = () => {
       setGenerateStatus(`✅ Generate successful! Script created: ${scriptFilename}`)
     } catch (error) {
       console.error('Generate error:', error)
-      setGenerateStatus(`❌ Generate failed: ${error.response?.data?.message || error.message}`)
+      setGenerateStatus(`❌ Generate failed: ${error.response?.data?.detail?.[0]?.msg || error.response?.data?.message || error.message}`)
     } finally {
       setGenerating(false)
     }
@@ -129,27 +180,34 @@ const FileUpload = () => {
     setConvertStatus('')
     setGenerateStatus('')
     setGeneratedScript(null)
+    setFlowData(null)
     const fileInput = document.getElementById('file-upload')
     if (fileInput) fileInput.value = ''
   }
 
   const handleRunScript = async () => {
     if (generatedScript) {
-    try {
-      // Call the /run endpoint with the script filename
-      const response = await axios.get(`${API_ENDPOINTS.RUN}?script=${encodeURIComponent(generatedScript)}`)
-      
-      // Open Locust UI in a new tab
-      const locustUrl = response.data?.ui_url || response.data?.url || 'http://localhost:8089'
-      window.open(locustUrl, '_blank')
-      
-      // Update status to show script is running
-      setGenerateStatus(`🚀 Script running! Locust UI opened: ${generatedScript}`)
-    } catch (error) {
-      console.error('Run script error:', error)
-      setGenerateStatus(`❌ Failed to run script: ${error.response?.data?.message || error.message}`)
+      try {
+        // Call the /run endpoint with the script filename
+        const response = await axios.get(`${API_ENDPOINTS.RUN}?script=${encodeURIComponent(generatedScript)}`)
+        
+        // Open Locust UI in a new tab
+        const locustUrl = response.data?.ui_url || response.data?.url || 'http://localhost:8089'
+        window.open(locustUrl, '_blank')
+        
+        // Update status to show script is running
+        setGenerateStatus(`🚀 Script running! Locust UI opened: ${generatedScript}`)
+      } catch (error) {
+        console.error('Run script error:', error)
+        setGenerateStatus(`❌ Failed to run script: ${error.response?.data?.message || error.message}`)
+      }
     }
-    }
+  }
+
+  const testFileUpload = () => {
+    console.log('Current selectedFile state:', selectedFile)
+    console.log('File input element:', document.getElementById('file-upload'))
+    console.log('File input files:', document.getElementById('file-upload')?.files)
   }
 
   return (
@@ -227,6 +285,31 @@ const FileUpload = () => {
           </div>
         )}
 
+        {/* Debug Button - Remove in production */}
+        <div className="flex space-x-2">
+          <button
+            onClick={testFileUpload}
+            className="flex-1 py-2 px-4 rounded-md font-medium bg-yellow-100 text-yellow-800 hover:bg-yellow-200 text-sm"
+          >
+            Debug File State
+          </button>
+          <button
+            onClick={() => {
+              setSelectedFile(null)
+              setFlowData(null)
+              setGeneratedScript(null)
+              const fileInput = document.getElementById('file-upload')
+              if (fileInput) fileInput.value = ''
+              setUploadStatus('')
+              setConvertStatus('')
+              setGenerateStatus('')
+            }}
+            className="flex-1 py-2 px-4 rounded-md font-medium bg-red-100 text-red-800 hover:bg-red-200 text-sm"
+          >
+            Clear File
+          </button>
+        </div>
+
         {/* Action Buttons */}
         <div className="space-y-3">
           {/* Upload Button */}
@@ -255,9 +338,9 @@ const FileUpload = () => {
           {/* Convert Button */}
           <button
             onClick={handleConvert}
-            disabled={converting}
+            disabled={converting || !selectedFile}
             className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
-              converting
+              converting || !selectedFile
                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 : 'bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2'
             }`}
@@ -278,9 +361,9 @@ const FileUpload = () => {
           {/* Generate Button */}
           <button
             onClick={handleGenerate}
-            disabled={generating}
+            disabled={generating || !flowData}
             className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
-              generating
+              generating || !flowData
                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 : 'bg-purple-600 text-white hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2'
             }`}

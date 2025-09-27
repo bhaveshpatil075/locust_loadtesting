@@ -12,7 +12,18 @@ const ScriptsList = () => {
     setError('')
     try {
       const response = await axios.get(API_ENDPOINTS.SCRIPTS)
-      setScripts(response.data?.scripts || response.data || [])
+      const scriptsData = response.data?.scripts || response.data || []
+      
+      // Handle both string array and object array responses
+      const processedScripts = Array.isArray(scriptsData) 
+        ? scriptsData.map(script => 
+            typeof script === 'string' 
+              ? { filename: script, file_path: script, file_size: null, created_at: null, modified_at: null }
+              : script
+          )
+        : []
+      
+      setScripts(processedScripts)
     } catch (err) {
       console.error('Error fetching scripts:', err)
       setError(`Failed to fetch scripts: ${err.response?.data?.message || err.message}`)
@@ -21,16 +32,6 @@ const ScriptsList = () => {
     }
   }
 
-  const handleRunScript = async (scriptName) => {
-    try {
-      const response = await axios.get(`${API_ENDPOINTS.RUN}?script=${encodeURIComponent(scriptName)}`)
-      const locustUrl = response.data?.ui_url || response.data?.url || 'http://localhost:8089'
-      window.open(locustUrl, '_blank')
-    } catch (err) {
-      console.error('Error running script:', err)
-      alert(`Failed to run script: ${err.response?.data?.message || err.message}`)
-    }
-  }
 
   useEffect(() => {
     fetchScripts()
@@ -76,21 +77,31 @@ const ScriptsList = () => {
         <div className="space-y-2">
           {scripts.map((script, index) => (
             <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-3 flex-1">
                 <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <span className="text-sm font-medium text-gray-900 font-mono">{script}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm font-medium text-gray-900 font-mono truncate">
+                      {script.filename || script}
+                    </span>
+                    {script.file_size && (
+                      <span className="text-xs text-gray-500">
+                        ({(script.file_size / 1024).toFixed(1)} KB)
+                      </span>
+                    )}
+                  </div>
+                  {script.created_at && (
+                    <p className="text-xs text-gray-500">
+                      Created: {new Date(script.created_at).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
               </div>
-              <button
-                onClick={() => handleRunScript(script)}
-                className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors"
-              >
-                <svg className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h1m4 0h1m-6-8h8a2 2 0 012 2v8a2 2 0 01-2 2H8a2 2 0 01-2-2V6a2 2 0 012-2z" />
-                </svg>
-                Run
-              </button>
+              <div className="text-xs text-gray-500 ml-2">
+                Available for testing
+              </div>
             </div>
           ))}
         </div>
