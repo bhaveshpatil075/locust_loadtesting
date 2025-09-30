@@ -1,5 +1,5 @@
 // API Configuration
-const API_BASE_URL = 'http://localhost:8001'
+const API_BASE_URL = 'http://localhost:9001'
 
 export const API_ENDPOINTS = {
   UPLOAD: `${API_BASE_URL}/upload`,
