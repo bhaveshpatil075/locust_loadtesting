@@ -13,6 +13,10 @@ const FileUpload = () => {
   const [generatedScript, setGeneratedScript] = useState(null)
   const [flowData, setFlowData] = useState(null)
   const [dragActive, setDragActive] = useState(false)
+  const [scriptFilename, setScriptFilename] = useState('')
+  const [filenameError, setFilenameError] = useState('')
+  const [targetHost, setTargetHost] = useState('')
+  const [hostError, setHostError] = useState('')
 
   const handleFileSelect = (file) => {
     if (file) {
@@ -24,9 +28,116 @@ const FileUpload = () => {
       setGenerateStatus('')
       setGeneratedScript(null)
       setFlowData(null)
+      
+      // Auto-generate filename from uploaded file
+      const baseName = file.name.replace(/\.[^/.]+$/, '') // Remove extension
+      const cleanName = baseName.replace(/[^a-zA-Z0-9_-]/g, '_') // Replace spaces and special chars
+      setScriptFilename(cleanName)
+      setFilenameError('')
     } else {
       console.log('No file selected or file is null')
     }
+  }
+
+  const validateFilename = (filename) => {
+    if (!filename.trim()) {
+      return 'Filename is required'
+    }
+    if (filename.includes(' ')) {
+      return 'Filename cannot contain spaces'
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(filename)) {
+      return 'Filename can only contain letters, numbers, underscores, and hyphens'
+    }
+    if (filename.length > 50) {
+      return 'Filename must be 50 characters or less'
+    }
+    return ''
+  }
+
+  const validateHost = (host) => {
+    if (!host.trim()) {
+      return 'Target host is required'
+    }
+    
+    const trimmedHost = host.trim()
+    
+    // Check for common invalid characters
+    if (/[<>"{}|\\^`\[\]]/.test(trimmedHost)) {
+      return 'Host contains invalid characters'
+    }
+    
+    // IP address validation (IPv4)
+    const ipPattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?::[0-9]{1,5})?$/
+    if (ipPattern.test(trimmedHost)) {
+      return '' // Valid IP address
+    }
+    
+    // URL validation with proper formatting
+    const urlPattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/
+    if (urlPattern.test(trimmedHost)) {
+      // Additional checks for URL format
+      if (trimmedHost.includes(' ')) {
+        return 'URL cannot contain spaces'
+      }
+      
+      // Check for double slashes (except after protocol)
+      if (trimmedHost.includes('//') && !trimmedHost.match(/^https?:\/\//)) {
+        return 'URL contains invalid double slashes'
+      }
+      
+      // Check for valid protocol if provided
+      if (trimmedHost.includes('://')) {
+        if (!trimmedHost.match(/^https?:\/\//)) {
+          return 'Only http:// and https:// protocols are supported'
+        }
+      }
+      
+      return '' // Valid URL
+    }
+    
+    // Check for localhost variations
+    const localhostPattern = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:[0-9]{1,5})?(\/.*)?$/
+    if (localhostPattern.test(trimmedHost)) {
+      return '' // Valid localhost
+    }
+    
+    // Check for basic domain format (without protocol)
+    const domainPattern = /^[\da-z\.-]+\.[a-z\.]{2,6}([\/\w \.-]*)*\/?$/
+    if (domainPattern.test(trimmedHost)) {
+      return '' // Valid domain (will be treated as https)
+    }
+    
+    return 'Please enter a valid URL (e.g., https://api.example.com), IP address (e.g., 192.168.1.100), or localhost'
+  }
+
+  const handleFilenameChange = (e) => {
+    const value = e.target.value
+    setScriptFilename(value)
+    setFilenameError(validateFilename(value))
+  }
+
+  const handleHostChange = (e) => {
+    const value = e.target.value
+    setTargetHost(value)
+    setHostError(validateHost(value))
+  }
+
+  const normalizeHost = (host) => {
+    const trimmedHost = host.trim()
+    
+    // If it already has a protocol, return as is
+    if (trimmedHost.match(/^https?:\/\//)) {
+      return trimmedHost
+    }
+    
+    // If it's an IP address or localhost, add http://
+    if (trimmedHost.match(/^(localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)/)) {
+      return `http://${trimmedHost}`
+    }
+    
+    // For domain names, add https://
+    return `https://${trimmedHost}`
   }
 
   const handleFileChange = (e) => {
@@ -120,10 +231,15 @@ const FileUpload = () => {
     setConvertStatus('')
 
     try {
-      const response = await axios.post(API_ENDPOINTS.CONVERT, {
+      const convertPayload = {
         // You can add any parameters needed for conversion
+        filename: scriptFilename || 'temp_script', // Pass filename if available
         timestamp: new Date().toISOString()
-      })
+      }
+      
+      console.log('Sending convert request with payload:', convertPayload)
+      
+      const response = await axios.post(API_ENDPOINTS.CONVERT, convertPayload)
       
       // Extract the flow_data from the convert response
       const flowData = response.data.flow_data
@@ -150,22 +266,52 @@ const FileUpload = () => {
       return
     }
 
+    // Validate filename
+    const filenameValidation = validateFilename(scriptFilename)
+    if (filenameValidation) {
+      setFilenameError(filenameValidation)
+      setGenerateStatus('❌ Please fix filename errors before generating')
+      return
+    }
+
+    // Validate host
+    const hostValidation = validateHost(targetHost)
+    if (hostValidation) {
+      setHostError(hostValidation)
+      setGenerateStatus('❌ Please fix host errors before generating')
+      return
+    }
+
     setGenerating(true)
     setGenerateStatus('')
     setGeneratedScript(null)
+    setFilenameError('')
+    setHostError('')
 
     try {
-      const response = await axios.post(API_ENDPOINTS.GENERATE, {
+      const normalizedHost = normalizeHost(targetHost)
+      
+      const generatePayload = {
         // Send the flow data directly (already extracted from convert response)
         ...flowData,
+        filename: scriptFilename, // Include custom filename
+        host: normalizedHost, // Include normalized target host
+        replace_existing: true, // Allow replacing existing files
         timestamp: new Date().toISOString(),
         type: 'load_test'
-      })
+      }
+      
+      console.log('Sending generate request with payload:', generatePayload)
+      console.log('Filename being sent:', scriptFilename)
+      console.log('Original host:', targetHost)
+      console.log('Normalized host:', normalizedHost)
+      
+      const response = await axios.post(API_ENDPOINTS.GENERATE, generatePayload)
       
       // Extract script filename from response
-      const scriptFilename = response.data?.filename || response.data?.script_name || response.data?.file || 'generated_script.py'
-      setGeneratedScript(scriptFilename)
-      setGenerateStatus(`✅ Generate successful! Script created: ${scriptFilename}`)
+      const responseFilename = response.data?.filename || response.data?.script_name || response.data?.file || scriptFilename
+      setGeneratedScript(responseFilename)
+      setGenerateStatus(`✅ Generate successful! Script created: ${responseFilename}`)
     } catch (error) {
       console.error('Generate error:', error)
       setGenerateStatus(`❌ Generate failed: ${error.response?.data?.detail?.[0]?.msg || error.response?.data?.message || error.message}`)
@@ -181,6 +327,10 @@ const FileUpload = () => {
     setGenerateStatus('')
     setGeneratedScript(null)
     setFlowData(null)
+    setScriptFilename('')
+    setFilenameError('')
+    setTargetHost('')
+    setHostError('')
     const fileInput = document.getElementById('file-upload')
     if (fileInput) fileInput.value = ''
   }
@@ -188,6 +338,8 @@ const FileUpload = () => {
   const handleRunScript = async () => {
     if (generatedScript) {
       try {
+        console.log('Running script with filename:', generatedScript)
+        
         // Call the /run endpoint with the script filename
         const response = await axios.get(`${API_ENDPOINTS.RUN}?script=${encodeURIComponent(generatedScript)}`)
         
@@ -298,6 +450,10 @@ const FileUpload = () => {
               setSelectedFile(null)
               setFlowData(null)
               setGeneratedScript(null)
+              setScriptFilename('')
+              setFilenameError('')
+              setTargetHost('')
+              setHostError('')
               const fileInput = document.getElementById('file-upload')
               if (fileInput) fileInput.value = ''
               setUploadStatus('')
@@ -358,12 +514,65 @@ const FileUpload = () => {
             )}
           </button>
 
+          {/* Filename Input */}
+          {flowData && (
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Script Filename
+              </label>
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  value={scriptFilename}
+                  onChange={handleFilenameChange}
+                  placeholder="Enter filename (no spaces)"
+                  className={`flex-1 px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                    filenameError ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-300'
+                  }`}
+                />
+                <div className="text-sm text-gray-500 flex items-center">
+                  .py
+                </div>
+              </div>
+              {filenameError && (
+                <p className="text-sm text-red-600">{filenameError}</p>
+              )}
+              <p className="text-xs text-gray-500">
+                Filename will be used to create the Locust script. Existing files with the same name will be replaced.
+              </p>
+            </div>
+          )}
+
+          {/* Host Input */}
+          {flowData && (
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Target Host
+              </label>
+              <input
+                type="text"
+                value={targetHost}
+                onChange={handleHostChange}
+                placeholder="Enter target server (e.g., api.example.com, https://api.example.com, 192.168.1.100, localhost:3000)"
+                className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                  hostError ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-300'
+                }`}
+              />
+              {hostError && (
+                <p className="text-sm text-red-600">{hostError}</p>
+              )}
+              <p className="text-xs text-gray-500">
+                The target server where the load test will be performed. Protocol will be added automatically if not provided (https for domains, http for IPs/localhost).
+              </p>
+            </div>
+          )}
+
           {/* Generate Button */}
           <button
             onClick={handleGenerate}
-            disabled={generating || !flowData}
+            disabled={generating || !flowData || !scriptFilename.trim() || !!filenameError || !targetHost.trim() || !!hostError}
             className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
-              generating || !flowData
+              generating || !flowData || !scriptFilename.trim() || !!filenameError || !targetHost.trim() || !!hostError
                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 : 'bg-purple-600 text-white hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2'
             }`}
